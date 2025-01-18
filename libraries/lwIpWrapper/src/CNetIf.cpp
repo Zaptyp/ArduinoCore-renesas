@@ -185,6 +185,7 @@ bool CLwipIf::initWifiHw(bool asStation)
         if (CEspControl::getInstance().initSpiDriver() == 0) {
             wifi_status = WL_NO_SSID_AVAIL;
         }
+        delay(2000);
 
         if (wifi_status == WL_NO_SSID_AVAIL) {
             int time_num = 0;
@@ -1567,10 +1568,9 @@ char b_dbg[512];
 extern "C" void printDbg(const char* fmt, ...)
 {
 
-    memset(b_dbg, 0x00, 256);
     va_list va;
     va_start(va, fmt);
-    vsprintf(b_dbg, fmt, va);
+    vsnprintf(b_dbg, sizeof(b_dbg), fmt, va);
     va_end(va);
 
     Serial.println(b_dbg);

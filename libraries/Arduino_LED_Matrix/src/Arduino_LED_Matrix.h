@@ -141,8 +141,10 @@ static uint32_t reverse(uint32_t x)
 }
 
 // TODO: this is dangerous, use with care
-#define loadSequence(frames)                loadWrapper(frames, sizeof(frames))
-#define renderBitmap(bitmap, rows, columns) loadPixels(&bitmap[0][0], rows*columns)
+#define loadSequence(frames)                    loadWrapper(frames, sizeof(frames))
+#define renderBitmap(bitmap, rows, columns)     loadPixels(&bitmap[0][0], rows*columns)
+#define endTextAnimation(scrollDirection, anim) endTextToAnimationBuffer(scrollDirection, anim ## _buf, sizeof(anim ## _buf), anim ## _buf_used)
+#define loadTextAnimationSequence(anim)         loadWrapper(anim ## _buf, anim ## _buf_used)
 
 static uint8_t __attribute__((aligned)) framebuffer[NUM_LEDS / 8];
 
@@ -169,7 +171,7 @@ public:
     void off(size_t pin) {
         turnLed(pin, false);
     }
-    bool begin() {
+    int begin() {
         bool rv = true;
         uint8_t type;
         int8_t ch = FspTimer::get_available_timer(type);
@@ -227,11 +229,11 @@ public:
         return false;
     }
 
-    void loadPixels(uint8_t *arr, size_t size){
+    static void loadPixelsToBuffer(uint8_t* arr, size_t size, uint32_t* dst) {
         uint32_t partialBuffer = 0;
         uint8_t pixelIndex = 0;
         uint8_t *frameP = arr;
-        uint32_t *frameHolderP = _frameHolder;
+        uint32_t *frameHolderP = dst;
         while (pixelIndex < size) {
             partialBuffer |= *frameP++;
             if ((pixelIndex + 1) % 32 == 0) {
@@ -240,6 +242,10 @@ public:
             partialBuffer = partialBuffer << 1;
             pixelIndex++;
         }
+    }
+
+    void loadPixels(uint8_t *arr, size_t size){
+        loadPixelsToBuffer(arr, size, _frameHolder);
         loadFrame(_frameHolder);
     };
 
@@ -252,6 +258,19 @@ public:
     void setCallback(voidFuncPtr callBack){
         _callBack = callBack;
     }
+
+    void clear() {
+        const uint32_t fullOff[] = {
+            0x00000000,
+            0x00000000,
+            0x00000000
+        };
+        loadFrame(fullOff);
+#ifdef MATRIX_WITH_ARDUINOGRAPHICS
+        memset(_canvasBuffer, 0, sizeof(_canvasBuffer));
+#endif
+    }
+
 
 #ifdef MATRIX_WITH_ARDUINOGRAPHICS
     virtual void set(int x, int y, uint8_t r, uint8_t g, uint8_t b) {
@@ -267,16 +286,48 @@ public:
       renderBitmap(_canvasBuffer, canvasHeight, canvasWidth);
     }
 
-    // display the drawing
+    // display the drawing or capture it to buffer when rendering dynamic anymation
     void endDraw() {
       ArduinoGraphics::endDraw();
-      renderBitmap(_canvasBuffer, canvasHeight, canvasWidth);
+
+      if (!captureAnimation) {
+        renderBitmap(_canvasBuffer, canvasHeight, canvasWidth);
+      } else {
+        if (captureAnimationHowManyRemains >= 4) {
+          loadPixelsToBuffer(&_canvasBuffer[0][0], sizeof(_canvasBuffer), captureAnimationFrame);
+          captureAnimationFrame[3] = _textScrollSpeed;
+          captureAnimationFrame += 4;
+          captureAnimationHowManyRemains -= 16;
+        }
+      }
+    }
+
+    void endTextToAnimationBuffer(int scrollDirection, uint32_t frames[][4], uint32_t howManyMax, uint32_t& howManyUsed) {
+      captureAnimationFrame = &frames[0][0];
+      captureAnimationHowManyRemains = howManyMax;
+
+      captureAnimation = true;
+      ArduinoGraphics::textScrollSpeed(0);
+      ArduinoGraphics::endText(scrollDirection);
+      ArduinoGraphics::textScrollSpeed(_textScrollSpeed);
+      captureAnimation = false;
+        
+      howManyUsed = howManyMax - captureAnimationHowManyRemains;
+    }
+
+    void textScrollSpeed(unsigned long speed) {
+      ArduinoGraphics::textScrollSpeed(speed);
+      _textScrollSpeed = speed;
     }
 
   private:
+    uint32_t* captureAnimationFrame = nullptr;
+    uint32_t captureAnimationHowManyRemains = 0;
+    bool captureAnimation = false;
     static const byte canvasWidth = 12;
     static const byte canvasHeight = 8;
     uint8_t _canvasBuffer[canvasHeight][canvasWidth] = {{0}};
+    unsigned long _textScrollSpeed = 100;
 #endif
 
 private:
